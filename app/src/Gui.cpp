@@ -11,86 +11,115 @@ using namespace myApp::gui;
 
 constexpr int WIDTH = 500;
 constexpr int HEIGHT = 300;
-inline HWND                  window = nullptr;
-inline WNDCLASSEXA           windowClass = {};
-inline POINTS                position = {};
-inline PDIRECT3D9            d3d = nullptr;
-inline LPDIRECT3DDEVICE9     device = nullptr;
-inline D3DPRESENT_PARAMETERS presentParameters = {};
 
-namespace
-{
-    void resetDevice() noexcept
-    {
-        ImGui_ImplDX9_InvalidateDeviceObjects();
-
-        const auto result = device->Reset(&presentParameters);
-
-        if (result == D3DERR_INVALIDCALL)
-        {
-            IM_ASSERT(0);
-        }
-
-        ImGui_ImplDX9_CreateDeviceObjects();
-    }
-
-} //namespace
-
-Gui::Gui(const char* windowName, const char* className):
+Gui::Gui():
     m_exit(false)
 {}
 
+LRESULT CALLBACK Gui::windowProcess(const HWND hWnd, const UINT msg, WPARAM wParam, const LPARAM lParam)
+{
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return true;
+
+    switch (msg)
+    {
+    case WM_SIZE:
+        if (m_device != nullptr && wParam != SIZE_MINIMIZED)
+        {
+            m_presentParameters.BackBufferWidth = LOWORD(lParam);
+            m_presentParameters.BackBufferHeight = HIWORD(lParam);
+            resetDevice();
+        }
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
+            return 0;
+        break;
+    case WM_LBUTTONDOWN:
+        m_position = MAKEPOINTS(lParam);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    case WM_MOUSEMOVE:
+
+        if (wParam == MK_LBUTTON)
+        {
+            const auto points = MAKEPOINTS(lParam);
+            auto rect = RECT{};
+
+            GetWindowRect(m_window, &rect);
+
+            rect.left += points.x - m_position.x;
+            rect.top += points.y - m_position.y;
+
+            if (m_position.x >= 0 && m_position.x < WIDTH
+                && m_position.y >= 0 && m_position.y < HEIGHT)
+            {
+                SetWindowPos(m_window, HWND_TOPMOST,
+                             rect.left,
+                             rect.top,
+                             0, 0,
+                             SWP_SHOWWINDOW | SWP_NOZORDER);
+            }
+        }
+
+    default:;
+    }
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
 void Gui::createWindow(const char* windowName, const char* className) noexcept
 {
-    windowClass.cbSize = sizeof(WNDCLASSEXA);
-    windowClass.style = CS_CLASSDC;
-    windowClass.lpfnWndProc = windowProcess;
-    windowClass.cbWndExtra = 0;
-    windowClass.hInstance = GetModuleHandleA(nullptr);
-    windowClass.hIcon = nullptr;
-    windowClass.hCursor = nullptr;
-    windowClass.hbrBackground = nullptr;
-    windowClass.lpszMenuName = nullptr;
-    windowClass.lpszClassName = className;
-    windowClass.hIconSm = nullptr;
+    m_windowClass.cbSize = sizeof(WNDCLASSEXA);
+    m_windowClass.style = CS_CLASSDC;
+    m_windowClass.lpfnWndProc = &windowProcess;
+    m_windowClass.cbClsExtra = 0;
+    m_windowClass.cbWndExtra = 0;
+    m_windowClass.hInstance = GetModuleHandleA(0);
+    m_windowClass.hIcon = 0;
+    m_windowClass.hCursor = 0;
+    m_windowClass.hbrBackground = 0;
+    m_windowClass.lpszMenuName = 0;
+    m_windowClass.lpszClassName = className;
+    m_windowClass.hIconSm = 0;
 
-    RegisterClassExA(&windowClass);
+    RegisterClassExA(&m_windowClass);
 
-    window = CreateWindowA(className, windowName, WS_POPUP,
-        100, 100, WIDTH, HEIGHT, 0, 0, windowClass.hInstance, 0);
+    setWindow(CreateWindowA(className, windowName, WS_POPUP,
+        100, 100, WIDTH, HEIGHT, 0, 0, m_windowClass.hInstance, 0));
 
-    ShowWindow(window, SW_SHOWDEFAULT);
-    UpdateWindow(window);
+    ShowWindow(getWindow(), SW_SHOWDEFAULT);
+    UpdateWindow(getWindow());
 }
 
 void Gui::destroyWindow() noexcept
 {
-    DestroyWindow(window);
-    UnregisterClass(windowClass.lpszClassName, windowClass.hInstance);
+    DestroyWindow(getWindow());
+    UnregisterClass(m_windowClass.lpszClassName, m_windowClass.hInstance);
 }
 
 bool Gui::createDevice() noexcept
 {
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    setDirect3D9(Direct3DCreate9(D3D_SDK_VERSION));
 
-    if (!d3d)
+    if (!getDirect3D9())
     {
         return false;
     }
 
-    ZeroMemory(&presentParameters, sizeof(presentParameters));
+    ZeroMemory(&m_presentParameters, sizeof(m_presentParameters));
 
-    presentParameters.Windowed = TRUE;
-    presentParameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    presentParameters.BackBufferFormat = D3DFMT_UNKNOWN;
-    presentParameters.EnableAutoDepthStencil = TRUE;
-    presentParameters.AutoDepthStencilFormat = D3DFMT_D16;
-    presentParameters.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
+    m_presentParameters.Windowed = TRUE;
+    m_presentParameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    m_presentParameters.BackBufferFormat = D3DFMT_UNKNOWN;
+    m_presentParameters.EnableAutoDepthStencil = TRUE;
+    m_presentParameters.AutoDepthStencilFormat = D3DFMT_D16;
+    m_presentParameters.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
 
-    if (d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
-        window,
-        D3DCREATE_HARDWARE_VERTEXPROCESSING,
-        &presentParameters, &device) < 0)
+    HRESULT hr = getDirect3D9()->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, m_window,
+    D3DCREATE_HARDWARE_VERTEXPROCESSING, &m_presentParameters, &m_device);
+
+    if (FAILED(hr))
     {
         return false;
     }
@@ -98,18 +127,32 @@ bool Gui::createDevice() noexcept
     return true;
 }
 
-void Gui::destroyDevice() noexcept
+void Gui::resetDevice() noexcept
 {
-    if (device)
+    ImGui_ImplDX9_InvalidateDeviceObjects();
+
+    const auto result = getDevice()->Reset(&m_presentParameters);
+
+    if (result == D3DERR_INVALIDCALL)
     {
-        device->Release();
-        device = nullptr;
+        IM_ASSERT(0);
     }
 
-    if (d3d)
+    ImGui_ImplDX9_CreateDeviceObjects();
+}
+
+void Gui::destroyDevice() noexcept
+{
+    if (getDevice())
     {
-        d3d->Release();
-        d3d = nullptr;
+        getDevice()->Release();
+        setDevice(nullptr);
+    }
+
+    if (getDirect3D9())
+    {
+        getDirect3D9()->Release();
+        setDirect3D9(nullptr);
     }
 }
 
@@ -123,8 +166,8 @@ void Gui::createImGui() noexcept
 
     ImGui::StyleColorsDark();
 
-    ImGui_ImplWin32_Init(window);
-    ImGui_ImplDX9_Init(device);
+    ImGui_ImplWin32_Init(m_window);
+    ImGui_ImplDX9_Init(getDevice());
 }
 
 void Gui::destroyImGui() noexcept
@@ -152,23 +195,23 @@ void Gui::beginRender() noexcept
 void Gui::endRender() noexcept
 {
     ImGui::EndFrame();
-    device->SetRenderState(D3DRS_ZENABLE, FALSE);
-    device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-    device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
-    device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_RGBA(0, 0, 0, 255), 1.0f, 0);
-    if (device->BeginScene() >= 0)
+    getDevice()->SetRenderState(D3DRS_ZENABLE, FALSE);
+    getDevice()->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    getDevice()->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    getDevice()->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_RGBA(0, 0, 0, 255), 1.0f, 0);
+    if (getDevice()->BeginScene() >= 0)
     {
         ImGui::Render();
         ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
-        device->EndScene();
+        getDevice()->EndScene();
     }
 
-    HRESULT result = device->Present(nullptr, nullptr, nullptr, nullptr);
+    HRESULT result = getDevice()->Present(nullptr, nullptr, nullptr, nullptr);
 
     // Handle loss of D3D9 device
-    if (result == D3DERR_DEVICELOST && device->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
+    if (result == D3DERR_DEVICELOST && getDevice()->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
     {
-        ::resetDevice();
+        resetDevice();
     }
 }
 
@@ -185,56 +228,4 @@ void Gui::render() noexcept
     );
 
     ImGui::End();
-}
-
-LRESULT WINAPI myApp::gui::windowProcess(const HWND hWnd, const UINT msg, WPARAM wParam, const LPARAM lParam)
-{
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return true;
-
-    switch (msg)
-    {
-    case WM_SIZE:
-        if (device != nullptr && wParam != SIZE_MINIMIZED)
-        {
-            presentParameters.BackBufferWidth = LOWORD(lParam);
-            presentParameters.BackBufferHeight = HIWORD(lParam);
-            resetDevice();
-        }
-        return 0;
-    case WM_SYSCOMMAND:
-        if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
-            return 0;
-        break;
-    case WM_LBUTTONDOWN:
-        position = MAKEPOINTS(lParam);
-        return 0;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    case WM_MOUSEMOVE:
-
-        if (wParam == MK_LBUTTON)
-        {
-            const auto points = MAKEPOINTS(lParam);
-            auto rect = RECT{};
-
-            GetWindowRect(window, &rect);
-
-            rect.left += points.x - position.x;
-            rect.top += points.y - position.y;
-
-            if (position.x >= 0 && position.x < WIDTH
-                && position.y >= 0 && position.y < HEIGHT)
-            {
-                SetWindowPos(window, HWND_TOPMOST,
-                             rect.left,
-                             rect.top,
-                             0, 0,
-                             SWP_SHOWWINDOW | SWP_NOZORDER);
-            }
-        }
-
-    default:;
-    }
-    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }

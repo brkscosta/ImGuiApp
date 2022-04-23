@@ -5,28 +5,22 @@
 
 using namespace myApp::gui;
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE previousInstance, LPSTR arguments, int commandShow)
+int WINAPI WinMain([[maybe_unused]] HINSTANCE hInstance,
+    HINSTANCE hPrevInstance,
+    [[maybe_unused]] LPSTR arguments,
+    [[maybe_unused]] int commandShow)
 {
     //create gui
-    auto gui = Gui();
-    gui.createWindow("My App", "MyAppGui");
-    if (!gui.createDevice())
-    {
-        std::cout << "Device not created" << std::endl;
-        return EXIT_FAILURE;
-    }
-    gui.createImGui();
+    auto gui = Gui("My App", "MyAppGui");
 
-    while (!gui.exit())
+    while (gui.exit())
     {
         gui.beginRender();
         gui.render();
         gui.endRender();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    gui.destroyImGui();
-    gui.destroyDevice();
-    gui.destroyWindow();
-
-    return EXIT_SUCCESS;
+    return gui.destroyApp();;
 }
